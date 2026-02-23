@@ -1,0 +1,50 @@
+# Created by venv; see https://docs.python.org/3/library/venv.html
+
+# --- SECRETS (Most Important) ---
+.env
+.env.test
+.env.local
+
+# --- PYTHON ARTIFACTS ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- VIRTUAL ENVIRONMENTS ---
+.venv/
+venv/
+ENV/
+env/
+
+# --- EDITOR & SYSTEM FILES ---
+.vscode/
+.idea/
+.project
+.pydevproject
+.settings/
+.DS_Store
+Thumbs.db
+
+# --- DATA & LOGS ---
+*.log
+data_collection_results/
+temp/
