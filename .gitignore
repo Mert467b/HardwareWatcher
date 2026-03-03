@@ -48,3 +48,9 @@ Thumbs.db
 *.log
 data_collection_results/
 temp/
+
+# Ignore the specific file
+data_logs.csv
+
+# Better: Ignore ALL CSV files (so you don't accidentally push new ones)
+*.csv
