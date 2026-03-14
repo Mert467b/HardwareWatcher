@@ -1,98 +1,112 @@
 import numpy as np
 import pandas as pd
-
-def preprocess_regression_data(df):
-    df["activity"] = df["activity"].map({"idle": 0, "light_load":1, "medium_load":2 })
-    df["surface_type"] = df["surface_type"].map({"soft":0, "rough":1})
-    df["cpu_boost_mode"] = df["cpu_boost_mode"].map({"disabled":0, "aggressive":1})
-
-    features = ["activity",	"surface_type",	"cpu_boost_mode",
-            "cpu_temp_slope", "cpu_power_W","cpu_util_pct",	
-            "cpu_freq_MHz", "ram_used_GB", "gpu_temp_C", 
-            "gpu_temp_slope", "gpu_util_pct", "gpu_clock_MHz","gpu_power_W"]
-
-    X = df[features].values
-    y = df["cpu_temp_C"].values
-
-    return X, y, features
-
-def calculate_mape(y_true, y_pred):
-    mape = np.mean(np.abs((y_true - y_pred) / (y_true + 1e-10))) * 100
-    return mape
-
-def evaluate_model(y_true, y_pred):
-    mae = np.mean(np.abs(y_true - y_pred))
-    mse = (np.mean((y_true - y_pred)**2))
-    rmse = np.sqrt(mse)
-    
-    
-    ss_res = np.sum((y_true - y_pred)**2)
-    ss_tot = np.sum((y_true - np.mean(y_true))**2)
-    r2 = 1 - (ss_res / ss_tot)
-    
-    return mae, r2, rmse
-
-def get_feature_importance(model, feature_names):
-    importance = {name: 0 for name in feature_names}
-    
-    def traverse_tree(node):
-        if not isinstance(node, dict): return
-        feat_name = feature_names[node['feature']]
-        importance[feat_name] += 1
-        traverse_tree(node['left'])
-        traverse_tree(node['right'])
-        
-    for tree in model.trees:
-        traverse_tree(tree.tree)
-        
-    total = sum(importance.values())
-    return {k: v / total for k, v in sorted(importance.items(), key=lambda item: item[1], reverse=True)}
-
-def evaluate_overfitting(model, X_train, y_pred, X_test, y_true):
-    import numpy as np
-
-def evaluate_overfitting(model, X_train, y_train, X_test, y_test):
-    model.fit(X_train, y_train)
-    
-    train_pred = model.predict(X_train)
-    test_pred = model.predict(X_test)
-    
-    def calculate_r2(y_true, y_pred):
-        ss_res = np.sum((y_true - y_pred)**2)
-        ss_tot = np.sum((y_true - np.mean(y_true))**2)
-        return 1 - (ss_res / ss_tot)
-
-
-    def calculate_mse(y_true, y_pred):
-        return np.mean((y_true - y_pred)**2)
-
-    train_r2 = calculate_r2(y_train, train_pred)
-    train_mse = calculate_mse(y_train, train_pred)
-    
-    
-    test_r2 = calculate_r2(y_test, test_pred)
-    test_mse = calculate_mse(y_test, test_pred)
-    
-    return train_r2, test_r2, train_mse, test_mse
+from sklearn.metrics import accuracy_score, roc_auc_score
 
 def preprocess_classification_data(df):
-    df['temp_rolling_5'] = df['cpu_temp_C'].rolling(window=5).mean().fillna(df['cpu_temp_C'])
-    df["activity"] = df["activity"].map({"idle": 0, "light_load":1, "medium_load":2 })
-    df["surface_type"] = df["surface_type"].map({"soft":0, "rough":1})
-    df["cpu_boost_mode"] = df["cpu_boost_mode"].map({"disabled":0, "aggressive":1})
-    df["throttle"] = ((df["cpu_temp_C"] > 90) & (df["cpu_freq_MHz"] < 2000)).astype(int)
-    features = ["activity",	"surface_type",	
-            "cpu_boost_mode",
-            "cpu_temp_slope",	"cpu_power_W",
-            "cpu_util_pct",	
-            "ram_used_GB",	"gpu_temp_C",
-            "gpu_temp_slope",	"gpu_util_pct",
-            "gpu_clock_MHz",	"gpu_power_W", 
-            "cpu_temp_C", 'temp_rolling_5']
-
+    print(f"1. Original Rows: {len(df)}")
+ 
+    for col in ["activity", "surface_type", "cpu_boost_mode"]:
+        df[col] = df[col].astype(str).str.strip().str.lower()
+ 
+    activity_map = {"idle": 0, "light_load": 1, "medium_load": 2, "heavy_load": 3, "cooling": 4}
+    df["activity"]       = df["activity"].map(activity_map)
+    df["surface_type"]   = df["surface_type"].map({"soft": 0, "rough": 1})
+    df["cpu_boost_mode"] = df["cpu_boost_mode"].map({"disabled": 0, "aggressive": 1})
+ 
+    for col in ["activity", "surface_type", "cpu_boost_mode"]:
+        if df[col].isnull().any():
+            print(f"Warning: Unexpected values found in {col}. Check your CSV for typos.")
+    
+    for col in ["cpu_temp_C", "cpu_power_W", "cpu_util_pct"]:
+        df[f"{col}_roll_mean_30"] = df[col].rolling(30).mean()
+        df[f"{col}_roll_std_30"]  = df[col].rolling(30).std()
+        df[f"{col}_roll_mean_60"] = df[col].rolling(60).mean()
+    
+    gpu_cols_available = []
+    for col in ["gpu_util_pct", "gpu_temp_C", "gpu_power_W", "gpu_clock_MHz"]:
+        if col in df.columns:
+            gpu_cols_available.append(col)
+        else:
+            print(f"Warning: {col} not found in CSV — skipping.")
+ 
+    print(f"  GPU columns found: {gpu_cols_available}")
+ 
+    df = df.ffill()
+    df = df.dropna()
+ 
+    df["is_throttling_now"] = ((df["cpu_temp_C"] > 85) & (df["cpu_freq_MHz"] < 2000)).astype(int)
+ 
+    prediction_window = 30
+ 
+    df["target_future_throttle"] = (
+        df["is_throttling_now"]
+        .shift(-prediction_window)
+        .rolling(window=prediction_window, min_periods=1)
+        .max()
+        
+    )
+ 
+    to_lag = ["cpu_power_W", "cpu_util_pct", "cpu_temp_C"] + gpu_cols_available
+    for col in to_lag:
+        for lag in [5, 10, 30]:
+            df[f"{col}_lag_{lag}"] = df[col].shift(lag)
+ 
+    if "cpu_temp_slope" in df.columns:
+        df["cpu_slope_lag_5"] = df["cpu_temp_slope"].shift(5)
+    else:
+        df["cpu_temp_slope"]  = df["cpu_temp_C"].diff()
+        df["cpu_slope_lag_5"] = df["cpu_temp_slope"].shift(5)
+ 
+    if "gpu_temp_C" in gpu_cols_available:
+        df["gpu_temp_slope"]   = df["gpu_temp_C"].diff()
+        df["gpu_slope_lag_5"]  = df["gpu_temp_slope"].shift(5)
+ 
+    df["freq_headroom"] = df["cpu_freq_MHz"] / 2000
+ 
+    if "gpu_clock_MHz" in gpu_cols_available:
+        gpu_max_freq = df["gpu_clock_MHz"].max()
+        df["gpu_freq_headroom"] = df["gpu_clock_MHz"] / gpu_max_freq
+        print(f"  GPU max freq used for headroom: {gpu_max_freq:.0f} MHz")
+ 
+    df = df.dropna().reset_index(drop=True)
+    print(f"2. Rows after dropping shift-induced NaNs: {len(df)}")
+ 
+    features = [
+    # Categorical
+        "activity", "surface_type", "cpu_boost_mode",
+ 
+    # Current State (Time t) - Crucial for baseline!
+        "cpu_power_W",
+        "cpu_util_pct",
+        "cpu_temp_C",
+        
+        "cpu_temp_C_roll_mean_30", "cpu_temp_C_roll_std_30",
+        "cpu_temp_C_roll_mean_60",
+        "cpu_power_W_roll_mean_30", "cpu_power_W_roll_std_30",
+        
+    # GPU Current State (if available)
+        "gpu_temp_C",
+ 
+    # CPU lag features (Time t-5, t-10)
+        "cpu_power_W_lag_5", "cpu_power_W_lag_10",
+        "cpu_util_pct_lag_5",  "cpu_util_pct_lag_10",
+        "cpu_temp_C_lag_5",    "cpu_temp_C_lag_10",
+ 
+    # CPU slope and headroom
+        "cpu_slope_lag_5", "freq_headroom",
+        
+    # GPU lag features
+        "gpu_temp_C_lag_5", "gpu_temp_C_lag_10"]
+ 
+ 
+    features = [f for f in features if f in df.columns]
+    print(f"\n  Total features: {len(features)}")
+    print(f"  → {features}")
+    
     X = df[features].values
-    y = df["throttle"].values
-    return X, y, features
+    y = df["target_future_throttle"].values
+    return X, y, features, prediction_window, df
+
 def classification_accuracy(model, X_test, y_test):
     predictions = model.predict(X_test)
     accuracy = np.mean(predictions == y_test)
@@ -117,7 +131,7 @@ def calculate_gap(model, X_train, X_test, y_train, y_test):
     test_acc = np.mean(test_preds == y_test)
     return train_acc, test_acc
 
-def confusion_matrix(y_true, y_pred):
+def print_confusion_matrix(y_true, y_pred):
     tp = np.sum((y_true == 1) & (y_pred == 1))
     tn = np.sum((y_true == 0) & (y_pred == 0))
     fp = np.sum((y_true == 0) & (y_pred == 1))
@@ -144,6 +158,22 @@ def confusion_matrix(y_true, y_pred):
     return p0, r0, f1_0, s0, p1, r1, f1_1, s1, acc 
 
 
+
+def quick_fit(model, X_tr, y_tr, X_te, y_te):
+    
+    model.fit(X_tr, y_tr)
+    
+    preds = model.predict(X_te)
+    
+    if hasattr(model, "predict_proba"):
+        proba = model.predict_proba(X_te)[:, 1]
+        auc = roc_auc_score(y_te, proba)
+    else:
+        auc = 0.0 
+        
+    acc = accuracy_score(y_te, preds)
+    
+    return model, acc, auc
 
 
 

@@ -1,119 +1,76 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 from src.models import (
-    DecisionTreeRegression, 
-    RandomForestRegressor, 
     DecisionTreeClassification, 
     RandomForestClassifier
-
 )
 from src.utils import (
-    calculate_mape,
-    evaluate_model,
-    get_feature_importance,
-    preprocess_regression_data,
-    evaluate_overfitting,
-    
     preprocess_classification_data,
     classification_accuracy,
-    confusion_matrix,
+    print_confusion_matrix,
     calculate_metrics,
     calculate_gap
 )
 from src.visualization import (
-    scatter_plot, 
-    histogram,
-    residual_plot
-)
+    plot_confusion_matrix, 
+    test_temporal_degradation, 
+    test_walk_forward)
+from xgboost import XGBClassifier
 
-TASK = 'classification' # Options: 'regression' or 'classification'
+TASK = 'RandomForest' # Options: 'RandomForest' or 'XGBoost'
 RUN_PLOTS = True    # True for plots on False for off
 DATA_FILE = 'data_logs.csv'
 
 
 def run_pipeline(data_path):
     df = pd.read_csv(data_path)
-    X, y, features = preprocess_regression_data(df)
-
-    np.random.seed(42)
-    indices = np.random.permutation(len(X))
-    split = int(0.8 * len(X))
-    train_idx, test_idx = indices[:split], indices[split:]
-
-    X_train, y_train = X[train_idx], y[train_idx]
-    X_test, y_test = X[test_idx], y[test_idx]
+    X, y, features, prediction_window, df_processed = preprocess_classification_data(df)
     
-    if TASK == 'regression':
-        X, y, features = preprocess_regression_data(df)
+    if TASK == 'RandomForest':
         np.random.seed(42)
-        indices = np.random.permutation(len(X))
-        split = int(0.8 * len(X))
-        train_idx, test_idx = indices[:split], indices[split:]
+        split_idx = int(len(df_processed) * 0.8)
+ 
+        train_df = df_processed.iloc[:split_idx - prediction_window]
+        test_df  = df_processed.iloc[split_idx:]
+ 
+        X_train, y_train = train_df[features].values, train_df["target_future_throttle"].values
+        X_test,  y_test  = test_df[features].values,  test_df["target_future_throttle"].values
+        model = RandomForestClassifier(n_trees=50, max_depth=4, min_samples_leaf=50, min_samples_split=100)
+        model.fit(X_train, y_train)
+        test_preds = model.predict(X_test)
+        train_preds = model.predict(X_train)
+        y_pred = test_preds
+        y_true = y_test
 
-        X_train, y_train = X[train_idx], y[train_idx]
-        X_test, y_test = X[test_idx], y[test_idx]
-        model = RandomForestRegressor(n_trees=15)
-    
     else:
-        X, y, features = preprocess_classification_data(df)
         np.random.seed(42)
-        indices = np.random.permutation(len(X))
-        split = int(0.8 * len(X))
-        train_idx, test_idx = indices[:split], indices[split:]
+        split_idx = int(len(df_processed) * 0.8)
+ 
+        train_df = df_processed.iloc[:split_idx - prediction_window]
+        test_df  = df_processed.iloc[split_idx:]
+ 
+        X_train, y_train = train_df[features].values, train_df["target_future_throttle"].values
+        X_test,  y_test  = test_df[features].values,  test_df["target_future_throttle"].values
 
-        X_train, y_train = X[train_idx], y[train_idx]
-        X_test, y_test = X[test_idx], y[test_idx]
-        model = RandomForestClassifier(n_trees=15)
+        xgb_model = XGBClassifier(
+            n_estimators=150,        # Slightly more trees to compensate for slower learning
+            max_depth=3,             # Shallower trees to prevent memorization
+            learning_rate=0.1,      # Slower, more cautious learning
+            subsample=0.8,           # Random Forest-style row sampling
+            colsample_bytree=0.8,    # Random Forest-style feature sampling
+            random_state=42,
+            eval_metric='logloss'
+        )
+        xgb_model.fit(X_train, y_train)
     
-    model.fit(X_train, y_train)
-    test_preds = model.predict(X_test)
-    train_preds = model.predict(X_train)
-    y_pred = test_preds
-    y_true = y_test
     
-    if TASK == 'regression':
-        
-        mape_score = calculate_mape(y_test, test_preds)
-        print(f"MAPE: {mape_score:.2f}%")
-        print(f"Model Accuracy: {100 - mape_score:.2f}%")
-
-        mae, r2, rmse = evaluate_model(y_test, test_preds)
-        print("\n--- Model Evaluation Results ---")
-        print(f"Mean Absolute Error (MAE):   {mae:.2f}")
-        print(f"Root Mean Squared Error (RMSE):    {rmse:.2f}")
-        print(f"R-squared (R2):              {r2:.4f}")
-        print("--------------------------------")
-
-        importances = get_feature_importance(model, features)
-        for feat, val in importances.items():
-            print(f"{feat}: {val:.4f}")
-    
-        train_r2, test_r2, train_mse, test_mse = evaluate_overfitting(model, X_train, y_train, X_test, y_test)
-        print(f"\n--- Model Performance ---")
-        print(f"Train R2 Score: {train_r2:.4f}")
-        print(f"Test R2 Score:  {test_r2:.4f}")
-        print(f"Train MSE:      {train_mse:.4f}")
-        print(f"Test MSE:       {test_mse:.4f}")
-
-        gap = train_r2 - test_r2
-        if gap > 0.15:
-            print(f"\n[!] WARNING: High Overfitting detected. Gap: {gap:.4f}")
-        elif train_r2 > 0.99 and test_r2 > 0.99:
-            print(f"\n[!] WARNING: Potential Data Leakage. Scores are suspiciously high.")
-        else:
-            print("\n[+] Model generalization looks reasonable.")
-        
-        if RUN_PLOTS:
-            scatter_plot(y_test, test_preds, title='Random Forest: Actual vs Predicted')
-            residual_plot(y_test, test_preds, title = 'Residual Plot: CPU Temperature Prediction')
-            histogram(y_test, test_preds, title = 'Histogram of Prediction Errors')
-    
-    elif TASK == 'classification':
+    if TASK == 'RandomForest':
         accuracy = classification_accuracy(model, X_test, y_test)
         print(f"Overall Accuracy: {accuracy * 100:.2f}%")
-        
-        p0, r0, f1_0, s0, p1, r1, f1_1, s1, acc = confusion_matrix(y_true, y_pred)
+    
+        p0, r0, f1_0, s0, p1, r1, f1_1, s1, acc = print_confusion_matrix(y_true, y_pred)
         print("Classification Report:")
         print(f"{'':>15} {'precision':>9} {'recall':>9} {'f1-score':>9} {'support':>9}")
         print(f"\n{'0.0':>15} {p0:>9.2f} {r0:>9.2f} {f1_0:>9.2f} {s0:>9}")
@@ -129,8 +86,41 @@ def run_pipeline(data_path):
         print(f"Training Accuracy: {train_acc:.4f}")
         print(f"Testing Accuracy:  {test_acc:.4f}")
         print(f"Gap: {train_acc - test_acc:.4f}")
+        
         if RUN_PLOTS:
-            pass
+            _, _, fig, ax = plot_confusion_matrix(y_true, y_pred)
+            plt.show()
+            
+            test_temporal_degradation(model,df_processed, features, prediction_window)
+            
+            test_walk_forward(model, df_processed, features, prediction_window)
+    
+    elif TASK == 'XGBoost':
+        y_probs = xgb_model.predict_proba(X_test)[:, 1]
+
+        custom_threshold = 0.85 
+
+        y_pred = (y_probs >= custom_threshold).astype(int)
+        y_true = y_test
+
+        accuracy = np.mean(y_pred == y_true)
+        print(f"Overall Accuracy: {accuracy * 100:.2f}%\n")
+
+        p0, r0, f1_0, s0, p1, r1, f1_1, s1, acc = print_confusion_matrix(y_true, y_pred)
+        print("Classification Report:")
+        print(f"{'':>15} {'precision':>9} {'recall':>9} {'f1-score':>9} {'support':>9}")
+        print(f"\n{'0.0':>15} {p0:>9.2f} {r0:>9.2f} {f1_0:>9.2f} {s0:>9}")
+        print(f"{'1.0':>15} {p1:>9.2f} {r1:>9.2f} {f1_1:>9.2f} {s1:>9}\n")
+
+        precision, recall, f1 = calculate_metrics(y_true, y_pred)
+        print(f"Precision: {precision:.2f}")
+        print(f"Recall: {recall:.2f}")
+        print(f"F1-Score: {f1:.2f}\n")
+
+        train_acc, test_acc = calculate_gap(xgb_model, X_train, X_test, y_train, y_test)
+        print(f"Training Accuracy: {train_acc:.4f}")
+        print(f"Testing Accuracy:  {test_acc:.4f}")
+        print(f"Gap: {train_acc - test_acc:.4f}")
 
 if __name__ == "__main__":
     run_pipeline(DATA_FILE)

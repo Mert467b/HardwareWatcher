@@ -24,9 +24,9 @@ print(f"DEBUG: URL is {LHM_URL}")
 response = requests.get(LHM_URL, auth=HTTPBasicAuth(USER, PASS), timeout=1)
 
 CSV_FILE = "data_logs.csv"
-CURRENT_ACTIVITY = "high_load"
+CURRENT_ACTIVITY = "cooling"
 SURFACE_TYPE = "rough"
-CPU_BOOST_TYPE = "agressive"
+CPU_BOOST_TYPE = "disabled"
 IS_CLOGGED = 1
 SESSION_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
 START_TIME_EPOCH = time.time()

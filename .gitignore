@@ -20,6 +20,7 @@ data_logs.csv
 # These stay on your disk but won't be pushed to GitHub
 classification/
 regression/
+app.py
 
 # --- SYSTEM FILES ---
 .vscode/
