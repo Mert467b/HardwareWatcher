@@ -1,10 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
-from src.utils import quick_fit # Added for the heatmap
+from src.utils import quick_fit 
 
 def plot_confusion_matrix(y_true, y_pred):
-    from src.utils import confusion_matrix as get_cm_data
     unique_classes = np.unique(np.concatenate([y_true, y_pred]))
     cm = np.zeros((len(unique_classes), len(unique_classes)), dtype=int)
     
@@ -30,7 +29,7 @@ def test_temporal_degradation(model, df, features, prediction_window):
  
     fractions = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
  
-    # Fixed test set: last 20% of data
+    
     fixed_split = int(len(df) * 0.8)
     test_df = df.iloc[fixed_split:]
     X_te = test_df[features].values
@@ -50,7 +49,7 @@ def test_temporal_degradation(model, df, features, prediction_window):
         results.append((frac, acc, auc))
         print(f"  Train frac={frac:.1f} | rows={cutoff:>5} | Acc={acc:.4f} | AUC={auc:.4f}")
  
-    # Plot
+    
     fracs, accs, aucs = zip(*results)
     plt.figure(figsize=(8, 4))
     plt.plot(fracs, accs, marker="o", label="Accuracy")
@@ -65,11 +64,7 @@ def test_temporal_degradation(model, df, features, prediction_window):
     plt.show()
     print("  → Plot saved: test1_temporal_degradation.png")
 
-    # ═════════════════════════════════════════════════════════════
-# TEST 4 — Walk-Forward Validation
-# Expectation: consistent AUC across all folds.
-# High variance → model may be implicitly tuned to one split.
-# ═════════════════════════════════════════════════════════════
+     
 def test_walk_forward(model, df, features, prediction_window):
     print("\n" + "=" * 55)
     print("TEST 4: Walk-Forward Validation")
@@ -103,7 +98,7 @@ def test_walk_forward(model, df, features, prediction_window):
         print(f"  cutoff={cutoff:.1f}       {len(train_df):>11} {len(test_df):>10} {acc:>8.4f} {auc:>8.4f}")
  
  
-    # Plot
+    
     plt.figure(figsize=(8, 4))
     plt.plot(cutoffs[:len(accs)], accs, marker="o", label="Accuracy")
     plt.plot(cutoffs[:len(aucs)], aucs, marker="s", label="AUC")
